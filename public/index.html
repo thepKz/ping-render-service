@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ping Service Manager</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+</head>
+<body class="bg-light">
+  <div class="container py-5">
+    <h1 class="mb-4">Ping Service Manager</h1>
+
+    <!-- Form thêm link -->
+    <form id="addForm" class="row g-3 mb-4">
+      <div class="col-auto flex-grow-1">
+        <input type="url" required class="form-control" id="urlInput" placeholder="https://example.onrender.com" />
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-primary">Thêm link</button>
+      </div>
+    </form>
+
+    <!-- Bảng hiển thị link -->
+    <table class="table table-bordered table-hover" id="linksTable">
+      <thead class="table-light">
+        <tr>
+          <th>URL</th>
+          <th>Enabled</th>
+          <th>Last Status</th>
+          <th>Last Ping</th>
+          <th>Thao tác</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    const api = {
+      getLinks: () => fetch('/links').then(r => r.json()),
+      addLink: url => fetch('/links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      }),
+      toggle: (id, enable) => fetch(`/links/${id}/${enable ? 'enable' : 'disable'}`, { method: 'PATCH' }),
+      remove: id => fetch(`/links/${id}`, { method: 'DELETE' }),
+    };
+
+    const tableBody = document.querySelector('#linksTable tbody');
+    const addForm = document.getElementById('addForm');
+
+    async function loadLinks() {
+      tableBody.innerHTML = '<tr><td colspan="5" class="text-center">Đang tải...</td></tr>';
+      const links = await api.getLinks();
+      if (!links.length) {
+        tableBody.innerHTML = '<tr><td colspan="5" class="text-center">Chưa có link nào</td></tr>';
+        return;
+      }
+      tableBody.innerHTML = '';
+      links.forEach(link => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${link.url}</td>
+          <td>${link.enabled ? '✅' : '❌'}</td>
+          <td>${link.lastStatus ?? '-'}</td>
+          <td>${link.lastPingAt ? new Date(link.lastPingAt).toLocaleString() : '-'}</td>
+          <td>
+            <button class="btn btn-sm ${link.enabled ? 'btn-warning' : 'btn-success'} me-1" data-action="toggle" data-id="${link._id}" data-enable="${!link.enabled}">
+              ${link.enabled ? 'Disable' : 'Enable'}
+            </button>
+            <button class="btn btn-sm btn-danger" data-action="delete" data-id="${link._id}">Delete</button>
+          </td>`;
+        tableBody.appendChild(tr);
+      });
+    }
+
+    // Add link handler
+    addForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const url = document.getElementById('urlInput').value.trim();
+      if (!url) return;
+      await api.addLink(url);
+      addForm.reset();
+      loadLinks();
+    });
+
+    // Delegate buttons in table
+    tableBody.addEventListener('click', async e => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      const id = btn.dataset.id;
+      const action = btn.dataset.action;
+      if (action === 'toggle') {
+        const enable = btn.dataset.enable === 'true';
+        await api.toggle(id, enable);
+      } else if (action === 'delete') {
+        if (!confirm('Bạn chắc chắn xoá?')) return;
+        await api.remove(id);
+      }
+      loadLinks();
+    });
+
+    // initial load
+    loadLinks();
+
+    // refresh mỗi 30s
+    setInterval(loadLinks, 30000);
+  </script>
+</body>
+</html> 
