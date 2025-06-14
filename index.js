@@ -34,6 +34,7 @@ const linkSchema = new mongoose.Schema({
     lastPingAt: Date,
     lastStatus: Number,
     lastError: String,
+    intervalMs: { type: Number, default: PING_INTERVAL }, // khoảng ping riêng (ms)
 });
 const Link = mongoose.model('Link', linkSchema);
 
@@ -60,13 +61,45 @@ app.get('/links', async (req, res) => {
     res.json(links);
 });
 
+// Utility: bảo đảm URL luôn bắt đầu http/https
+function normalizeUrl(u) {
+    if (!u) return u;
+    return /^https?:\/\//i.test(u) ? u : `https://${u}`;
+}
+
 // Add new link
 app.post('/links', async (req, res) => {
-    const { url } = req.body;
+    const { url, interval } = req.body;
     if (!url) return res.status(400).json({ error: 'url is required' });
+    const cleanUrl = normalizeUrl(url);
+    const intervalMs = interval ? parseInt(interval) * 1000 : PING_INTERVAL;
     try {
-        const link = await Link.create({ url });
+        const link = await Link.create({ url: cleanUrl, intervalMs });
         res.status(201).json(link);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Edit link (update url and/or enabled)
+app.patch('/links/:id', async (req, res) => {
+    const updates = {};
+    if (req.body.url !== undefined) {
+        updates.url = normalizeUrl(req.body.url);
+    }
+    if (req.body.enabled !== undefined) {
+        updates.enabled = req.body.enabled;
+    }
+    if (req.body.interval !== undefined) {
+        updates.intervalMs = parseInt(req.body.interval) * 1000;
+    }
+    if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: 'No fields to update' });
+    }
+    try {
+        const link = await Link.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
+        if (!link) return res.status(404).json({ error: 'Not found' });
+        res.json(link);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -124,7 +157,10 @@ async function pingLink(link) {
 async function pingAllLinks() {
     const links = await Link.find({ enabled: true });
     for (const link of links) {
-        await pingLink(link);
+        const shouldPing = !link.lastPingAt || (Date.now() - new Date(link.lastPingAt)) >= (link.intervalMs || PING_INTERVAL);
+        if (shouldPing) {
+            await pingLink(link);
+        }
     }
 }
 

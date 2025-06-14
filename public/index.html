@@ -11,11 +11,16 @@
     <h1 class="mb-4">Ping Service Manager</h1>
 
     <!-- Form thêm link -->
-    <form id="addForm" class="row g-3 mb-4">
-      <div class="col-auto flex-grow-1">
+    <form id="addForm" class="row g-3 mb-4 align-items-end">
+      <div class="col-sm-6">
+        <label class="form-label">URL</label>
         <input type="url" required class="form-control" id="urlInput" placeholder="https://example.onrender.com" />
       </div>
-      <div class="col-auto">
+      <div class="col-sm-3">
+        <label class="form-label">Interval (s)</label>
+        <input type="number" min="5" class="form-control" id="intervalInput" placeholder="60" />
+      </div>
+      <div class="col-sm-3 d-grid">
         <button type="submit" class="btn btn-primary">Thêm link</button>
       </div>
     </form>
@@ -25,6 +30,7 @@
       <thead class="table-light">
         <tr>
           <th>URL</th>
+          <th>Interval (s)</th>
           <th>Enabled</th>
           <th>Last Status</th>
           <th>Last Ping</th>
@@ -60,12 +66,16 @@
       tableBody.innerHTML = '';
       links.forEach(link => {
         const tr = document.createElement('tr');
+        const relTime = link.lastPingAt ? relativeTime(link.lastPingAt) : '-';
         tr.innerHTML = `
           <td>${link.url}</td>
+          <td>${(link.intervalMs ?? 60000)/1000}</td>
           <td>${link.enabled ? '✅' : '❌'}</td>
           <td>${link.lastStatus ?? '-'}</td>
-          <td>${link.lastPingAt ? new Date(link.lastPingAt).toLocaleString() : '-'}</td>
+          <td>${link.lastPingAt ? `${relTime} <span class="text-muted" title="${new Date(link.lastPingAt).toLocaleString()}">(${new Date(link.lastPingAt).toLocaleTimeString()})</span>` : '-'}</td>
           <td>
+            <button class="btn btn-sm btn-secondary me-1" data-action="edit" data-id="${link._id}" data-url="${link.url}">Edit URL</button>
+            <button class="btn btn-sm btn-info me-1" data-action="editInterval" data-id="${link._id}" data-i="${(link.intervalMs ?? 60000)/1000}">Edit Int</button>
             <button class="btn btn-sm ${link.enabled ? 'btn-warning' : 'btn-success'} me-1" data-action="toggle" data-id="${link._id}" data-enable="${!link.enabled}">
               ${link.enabled ? 'Disable' : 'Enable'}
             </button>
@@ -78,9 +88,15 @@
     // Add link handler
     addForm.addEventListener('submit', async e => {
       e.preventDefault();
-      const url = document.getElementById('urlInput').value.trim();
+      let url = document.getElementById('urlInput').value.trim();
+      const interval = parseInt(document.getElementById('intervalInput').value);
       if (!url) return;
-      await api.addLink(url);
+      if (!/^https?:\/\//i.test(url)) url = 'https://' + url; // auto prepend
+      await fetch('/links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, interval })
+      });
       addForm.reset();
       loadLinks();
     });
@@ -91,12 +107,31 @@
       if (!btn) return;
       const id = btn.dataset.id;
       const action = btn.dataset.action;
-      if (action === 'toggle') {
+      if (action === 'edit') {
+        const current = btn.dataset.url;
+        let newUrl = prompt('Nhập URL mới', current);
+        if (!newUrl || newUrl === current) return;
+        if (!/^https?:\/\//i.test(newUrl)) newUrl = 'https://' + newUrl;
+        await fetch(`/links/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: newUrl })
+        });
+      } else if (action === 'toggle') {
         const enable = btn.dataset.enable === 'true';
         await api.toggle(id, enable);
       } else if (action === 'delete') {
         if (!confirm('Bạn chắc chắn xoá?')) return;
         await api.remove(id);
+      } else if (action === 'editInterval') {
+        const currentInt = parseInt(btn.dataset.i);
+        let newInt = prompt('Interval (s):', currentInt);
+        if (!newInt) return;
+        await fetch(`/links/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ interval: parseInt(newInt) })
+        });
       }
       loadLinks();
     });
@@ -104,8 +139,21 @@
     // initial load
     loadLinks();
 
-    // refresh mỗi 30s
-    setInterval(loadLinks, 30000);
+    // refresh mỗi 5s
+    setInterval(loadLinks, 5000);
+
+    // Helper: relative time
+    function relativeTime(dateStr) {
+      const diffMs = Date.now() - new Date(dateStr);
+      const sec = Math.floor(diffMs / 1000);
+      if (sec < 60) return `${sec}s ago`;
+      const min = Math.floor(sec / 60);
+      if (min < 60) return `${min}m ago`;
+      const hr = Math.floor(min / 60);
+      if (hr < 24) return `${hr}h ago`;
+      const d = Math.floor(hr / 24);
+      return `${d}d ago`;
+    }
   </script>
 </body>
 </html> 
